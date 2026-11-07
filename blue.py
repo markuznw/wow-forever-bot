@@ -14,7 +14,8 @@ FORUM = "https://us.forums.blizzard.com/en/wow"
 TRACKER = f"{FORUM}/groups/blizzard-tracker/posts.json"
 FOREVER_CATEGORIES = {346, 347, 348, 352}  # WoW: Forever e sottocategorie
 UA = "Mozilla/5.0 (compatible; wow-forever-telegram-bot/1.0)"
-LOGO_FILE = Path(__file__).with_name("assets") / "logo.png"  # logo opzionale per l'intestazione
+HERE = Path(__file__).parent
+LOGO_MIME = {".png": "image/png", ".webp": "image/webp", ".avif": "image/avif", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 MAX_BODY_PX = 1200  # oltre questa altezza il testo sfuma e si rimanda al forum
 
 CSS = """
@@ -117,11 +118,23 @@ def sanitize(cooked: str) -> str:
     return c
 
 
+def find_logo():
+    """Cerca un file logo (logo.png/.webp/.avif/.jpg, o qualsiasi *logo*.*) nella radice o in assets/."""
+    for folder in (HERE / "assets", HERE):
+        if not folder.is_dir():
+            continue
+        for f in sorted(folder.iterdir()):
+            if f.suffix.lower() in LOGO_MIME and "logo" in f.name.lower():
+                return f
+    return None
+
+
 def logo_tag() -> str:
-    if not LOGO_FILE.exists():
+    f = find_logo()
+    if not f:
         return ""
-    data = base64.b64encode(LOGO_FILE.read_bytes()).decode()
-    return f'<img class="logo" src="data:image/png;base64,{data}">'
+    data = base64.b64encode(f.read_bytes()).decode()
+    return f'<img class="logo" src="data:{LOGO_MIME[f.suffix.lower()]};base64,{data}">'
 
 
 def build_html(item, cooked: str, months) -> str:
