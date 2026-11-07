@@ -6,7 +6,9 @@ scarta quelle già pubblicate (seen.json) e le invia al canale.
 
 Variabili d'ambiente:
   TELEGRAM_BOT_TOKEN  token del bot (da @BotFather)
-  TELEGRAM_CHANNEL    @nomecanale oppure id numerico (-100...)
+  TELEGRAM_CHANNEL    @nomecanale, id numerico (-100...) oppure un link
+                      t.me/c/<id>/<topic> o t.me/<nome>/<topic> (gruppo con argomenti)
+  TELEGRAM_TOPIC_ID   (opzionale) id dell'argomento, se non è nel link
   DRY_RUN=1           stampa i messaggi invece di inviarli
 """
 import html
@@ -92,7 +94,20 @@ def collect():
     return items
 
 
-def send(token, chat, item):
+def parse_target(raw: str):
+    """Restituisce (chat_id, topic_id) da @nome, -100..., o link t.me."""
+    raw = raw.strip()
+    topic = os.environ.get("TELEGRAM_TOPIC_ID", "").strip() or None
+    m = re.match(r"(?:https?://)?t\.me/c/(\d+)(?:/(\d+))?(?:/\d+)?/?$", raw)
+    if m:
+        return "-100" + m.group(1), topic or m.group(2)
+    m = re.match(r"(?:https?://)?t\.me/([A-Za-z0-9_]+)(?:/(\d+))?(?:/\d+)?/?$", raw)
+    if m:
+        return "@" + m.group(1), topic or m.group(2)
+    return raw, topic
+
+
+def send(token, chat, item, topic=None):
     text = f"<b>{html.escape(item['title'])}</b>"
     if item["summary"]:
         text += f"\n\n{html.escape(item['summary'])}"
@@ -100,12 +115,18 @@ def send(token, chat, item):
     if os.environ.get("DRY_RUN"):
         print("---\n" + text)
         return True
+    payload = {"chat_id": chat, "text": text, "parse_mode": "HTML"}
+    if topic:
+        payload["message_thread_id"] = int(topic)
     for _ in range(3):
         r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat, "text": text, "parse_mode": "HTML"},
-            timeout=20,
+            f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=20
         )
+        if r.status_code == 400 and "thread not found" in r.text.lower() and topic:
+            print(f"[warn] argomento {topic} non trovato, invio nel gruppo principale", file=sys.stderr)
+            payload.pop("message_thread_id")
+            topic = None
+            continue
         if r.status_code == 429:
             time.sleep(r.json().get("parameters", {}).get("retry_after", 5) + 1)
             continue
@@ -116,10 +137,11 @@ def send(token, chat, item):
 
 
 def main():
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat = os.environ.get("TELEGRAM_CHANNEL", "")
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat, topic = parse_target(os.environ.get("TELEGRAM_CHANNEL", ""))
     if not os.environ.get("DRY_RUN") and not (token and chat):
         sys.exit("Mancano TELEGRAM_BOT_TOKEN e/o TELEGRAM_CHANNEL")
+    print(f"[info] destinazione: chat {chat}" + (f", argomento {topic}" if topic else ""))
 
     state = load_state()
     seen = set(state["seen"])
@@ -140,7 +162,7 @@ def main():
 
     posted = 0
     for it, _ in to_post:
-        if send(token, chat, it):
+        if send(token, chat, it, topic):
             posted += 1
             time.sleep(3)
     print(f"[info] nuove: {len(new)}, pubblicate: {posted}")

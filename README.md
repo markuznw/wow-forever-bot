@@ -13,7 +13,7 @@ Se una fonte non risponde, la salta e continua con le altre.
 2. **Aggiungilo al canale**: apri il canale → Amministratori → aggiungi il bot con il permesso "Pubblica messaggi".
 3. **Inserisci i secret** nel repo, da *Settings → Secrets and variables → Actions → New repository secret*:
    - `TELEGRAM_BOT_TOKEN` = il token del bot
-   - `TELEGRAM_CHANNEL` = `@nomedelcanale` (per un canale privato usa l'id numerico, che inizia con `-100`)
+   - `TELEGRAM_CHANNEL` = `@nomedelcanale`, oppure il link di un argomento di un gruppo (es. `https://t.me/c/1234567890/39`): il bot pubblica in quell'argomento
 4. **Avvialo**: tab *Actions* → "WoW Forever news → Telegram" → *Run workflow*.
 
 Al primo avvio pubblica solo le 3 news più recenti. Da lì in poi pubblica solo quelle nuove, fino a 10 per giro.
