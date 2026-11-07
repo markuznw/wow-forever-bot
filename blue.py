@@ -15,6 +15,10 @@ TRACKER = f"{FORUM}/groups/blizzard-tracker/posts.json"
 FOREVER_CATEGORIES = {346, 347, 348, 352}  # WoW: Forever e sottocategorie
 UA = "Mozilla/5.0 (compatible; wow-forever-telegram-bot/1.0)"
 HERE = Path(__file__).parent
+LOGO_URL = os.environ.get("LOGO_URL") or (
+    "https://blz-contentstack-images.akamaized.net/v3/assets/blt9c12f249ac15c7ec/"
+    "blt527dd61848a757c7/6aa3316cad92093ee45628fd/camelot-logo-gamepage.png"
+)
 LOGO_MIME = {".png": "image/png", ".webp": "image/webp", ".avif": "image/avif", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 MAX_BODY_PX = 1200  # oltre questa altezza il testo sfuma e si rimanda al forum
 
@@ -36,7 +40,7 @@ body { margin: 0; padding: 24px; background: #0e1014; width: 860px;
 .who { display: flex; flex-direction: column; }
 .name { color: #fff; font-weight: 700; font-size: 20px; }
 .role { color: #8fd0ff; font-size: 14px; }
-.logo { margin-left: auto; height: 64px; width: auto; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+.logo { margin-left: auto; height: 78px; width: auto; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
 .badge { margin-left: auto; color: #0b2747; background: #4fb3ff; font-weight: 700; font-size: 12px;
          letter-spacing: .08em; padding: 5px 10px; border-radius: 999px; text-transform: uppercase; }
 .title { color: #fff; font-size: 22px; font-weight: 700; padding: 18px 26px 0; line-height: 1.3; }
@@ -132,7 +136,8 @@ def find_logo():
 def logo_tag() -> str:
     f = find_logo()
     if not f:
-        return ""
+        # nessun file locale: usa il logo online (se non carica, l'immagine viene nascosta)
+        return f'<img class="logo" src="{html.escape(LOGO_URL, quote=True)}" onerror="this.remove()">' if LOGO_URL else ""
     data = base64.b64encode(f.read_bytes()).decode()
     return f'<img class="logo" src="data:{LOGO_MIME[f.suffix.lower()]};base64,{data}">'
 
