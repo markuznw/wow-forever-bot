@@ -37,6 +37,7 @@ MAX_POSTS_PER_RUN = 10   # evita di inondare il canale
 SUMMARY_CHARS = 900      # lunghezza massima del testo sotto il titolo
 FIRST_RUN_POSTS = 10     # news pubblicate al primo avvio
 FIRST_RUN_BLUE = 5       # blue post pubblicati la prima volta
+SILENT = os.environ.get("SILENT", "on").lower() not in ("0", "off", "no", "false")  # invio senza notifica
 BLUE_POSTS = os.environ.get("BLUE_POSTS", "on").lower() not in ("0", "off", "no", "false")
 TARGET_LANG = os.environ.get("TRANSLATE_TO", "off").strip()  # es. "it" per tradurre
 if TARGET_LANG.lower() in ("", "off", "no", "none"):
@@ -221,7 +222,7 @@ def tg_post(token, method, payload, files=None):
     """Chiama la Bot API gestendo argomento mancante e limiti di frequenza."""
     for _ in range(4):
         if files:
-            data = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in payload.items()}
+            data = {k: (json.dumps(v) if isinstance(v, (dict, list, bool)) else v) for k, v in payload.items()}
             r = requests.post(f"https://api.telegram.org/bot{token}/{method}", data=data, files=files, timeout=60)
         else:
             r = requests.post(f"https://api.telegram.org/bot{token}/{method}", json=payload, timeout=20)
@@ -258,7 +259,7 @@ def send_blue(token, chat, item, topic=None):
             Path(out, f"blue-{item['id']}.png").write_bytes(png)
         print(f"---\n[blue post, immagine: {'sì' if png else 'no'}]\n{caption}\n[pulsanti] {item['link']} | {item['wowhead']}")
         return True
-    payload = {"chat_id": chat, "parse_mode": "HTML", "reply_markup": buttons}
+    payload = {"chat_id": chat, "parse_mode": "HTML", "reply_markup": buttons, "disable_notification": SILENT}
     if topic:
         payload["message_thread_id"] = int(topic)
     if png:
@@ -286,6 +287,7 @@ def send(token, chat, item, topic=None):
     payload = {
         "chat_id": chat,
         "parse_mode": "HTML",
+        "disable_notification": SILENT,
         "reply_markup": {"inline_keyboard": [[{"text": f"📖 Leggi su {item['source']}", "url": item["link"]}]]},
     }
     if photo:

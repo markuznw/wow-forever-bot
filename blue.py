@@ -1,10 +1,12 @@
 """Blue post (post dello staff Blizzard) dal forum ufficiale, resi come immagine."""
+import base64
 import html
 import os
 import re
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 import requests
 
@@ -12,6 +14,7 @@ FORUM = "https://us.forums.blizzard.com/en/wow"
 TRACKER = f"{FORUM}/groups/blizzard-tracker/posts.json"
 FOREVER_CATEGORIES = {346, 347, 348, 352}  # WoW: Forever e sottocategorie
 UA = "Mozilla/5.0 (compatible; wow-forever-telegram-bot/1.0)"
+LOGO_FILE = Path(__file__).with_name("assets") / "logo.png"  # logo opzionale per l'intestazione
 MAX_BODY_PX = 1200  # oltre questa altezza il testo sfuma e si rimanda al forum
 
 CSS = """
@@ -24,6 +27,7 @@ body { margin: 0; padding: 24px; background: #0e1014; width: 860px;
         background: linear-gradient(90deg, #0b2747 0%, #123d6c 60%, #0f3157 100%);
         border-bottom: 1px solid #1f4f86; }
 .av { position: relative; width: 56px; height: 56px; flex: none; }
+.logo + .badge { margin-left: 14px; }
 .av .ini { position: absolute; inset: 0; border-radius: 50%; border: 2px solid #4fb3ff;
            background: radial-gradient(circle at 30% 30%, #2a7fd4, #0b2747); color: #fff;
            display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 26px; }
@@ -31,6 +35,7 @@ body { margin: 0; padding: 24px; background: #0e1014; width: 860px;
 .who { display: flex; flex-direction: column; }
 .name { color: #fff; font-weight: 700; font-size: 20px; }
 .role { color: #8fd0ff; font-size: 14px; }
+.logo { margin-left: auto; height: 64px; width: auto; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
 .badge { margin-left: auto; color: #0b2747; background: #4fb3ff; font-weight: 700; font-size: 12px;
          letter-spacing: .08em; padding: 5px 10px; border-radius: 999px; text-transform: uppercase; }
 .title { color: #fff; font-size: 22px; font-weight: 700; padding: 18px 26px 0; line-height: 1.3; }
@@ -112,6 +117,13 @@ def sanitize(cooked: str) -> str:
     return c
 
 
+def logo_tag() -> str:
+    if not LOGO_FILE.exists():
+        return ""
+    data = base64.b64encode(LOGO_FILE.read_bytes()).decode()
+    return f'<img class="logo" src="data:image/png;base64,{data}">'
+
+
 def build_html(item, cooked: str, months) -> str:
     d = item["dt"]
     date = f"{d.day} {months[d.month - 1]} {d.year}"
@@ -121,7 +133,7 @@ def build_html(item, cooked: str, months) -> str:
 <style>{CSS}</style></head><body><div class="card">
 <div class="head"><div class="av"><div class="ini">{html.escape((item['author'] or 'B')[:1].upper())}</div><img src="{html.escape(item['avatar'], quote=True)}" onerror="this.remove()"></div>
 <div class="who"><span class="name">{html.escape(item['author'])}</span><span class="role">{html.escape(item['role'])}</span></div>
-<span class="badge">Blue post</span></div>
+{logo_tag()}<span class="badge">Blue post</span></div>
 <div class="title">{html.escape(item['title'])}</div>
 <div class="body" id="body">{sanitize(cooked)}</div>
 <div class="foot">WoW: Forever · Blue post · {date}</div>
