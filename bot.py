@@ -248,18 +248,17 @@ def send_blue(token, chat, item, topic=None):
         f"<b>{html.escape(item['title'], quote=False)}</b>\n"
         f"<i>🗓 {date} · #WoWForever #BluePost{(' ' + tags) if tags else ''}</i>"
     )
-    links = (f'📖 <a href="{html.escape(item["wowhead"], quote=True)}">Leggi su Wowhead</a> · '
-             f'💬 <a href="{html.escape(item["link"], quote=True)}">Forum</a>')
     pngs = blue.render(item, MONTHS)
 
-    def caption(with_links):
-        # il riassunto si accorcia finché la didascalia sta nei 1024 caratteri di Telegram
-        for limit in (700, 550, 400, 250, 0):
+    def caption(max_chars):
+        # il riassunto si accorcia finché il testo sta nel limite di Telegram
+        # (1024 caratteri per le didascalie, 4096 per i messaggi di testo)
+        for limit in (3500, 2500, 1500, 700, 550, 400, 250, 0):
+            if limit > max_chars:
+                continue
             summ = blue.summary(item, limit) if limit else ""
             text = head + (f"\n\n<blockquote expandable>{summ}</blockquote>" if summ else "")
-            if with_links:
-                text += "\n\n" + links
-            if len(html.unescape(re.sub(r"<[^>]+>", "", text))) <= 1000:
+            if len(html.unescape(re.sub(r"<[^>]+>", "", text))) <= max_chars - 24:
                 return text
         return head
 
@@ -268,13 +267,14 @@ def send_blue(token, chat, item, topic=None):
         {"text": "💬 Forum", "url": item["link"]},
     ]]}
     album = len(pngs) > 1
-    text = caption(with_links=album)
+    # album: immagini senza didascalia + messaggio di testo (più lungo e con pulsanti) subito sotto
+    text = caption(4096) if album or not pngs else caption(1024)
     if os.environ.get("DRY_RUN"):
         out = os.environ.get("BLUE_PREVIEW_DIR")
         if out:
             for i, png in enumerate(pngs, 1):
                 Path(out, f"blue-{item['id']}-{i}.png").write_bytes(png)
-        print(f"---\n[blue post, immagini: {len(pngs)}]\n{text}\n" + ("" if album else f"[pulsanti] {item['wowhead']} | {item['link']}"))
+        print(f"---\n[blue post, immagini: {len(pngs)}{' (album + messaggio di testo)' if album else ''}]\n{text}\n[pulsanti] {item['wowhead']} | {item['link']}")
         return True
 
     base = {"chat_id": chat, "disable_notification": SILENT}
@@ -282,17 +282,19 @@ def send_blue(token, chat, item, topic=None):
         base["message_thread_id"] = int(topic)
     if album:
         media = [{"type": "photo", "media": f"attach://p{i}"} for i in range(len(pngs))]
-        media[0].update(caption=text, parse_mode="HTML")
         files = {f"p{i}": (f"bluepost-{i + 1}.png", png, "image/png") for i, png in enumerate(pngs)}
-        if tg_post(token, "sendMediaGroup", dict(base, media=media), files=files).ok:
-            return True
+        if not tg_post(token, "sendMediaGroup", dict(base, media=media), files=files).ok:
+            print("[warn] album del blue post non inviato, invio solo il testo", file=sys.stderr)
+        time.sleep(1)
+        return tg_post(token, "sendMessage", dict(base, text=text, parse_mode="HTML", reply_markup=buttons,
+                                                  link_preview_options={"is_disabled": True})).ok
     elif pngs:
         r = tg_post(token, "sendPhoto", dict(base, caption=text, parse_mode="HTML", reply_markup=buttons),
                     files={"photo": ("bluepost.png", pngs[0], "image/png")})
         if r.ok:
             return True
     print("[warn] immagini del blue post non inviate, invio come testo", file=sys.stderr)
-    return tg_post(token, "sendMessage", dict(base, text=caption(with_links=False), parse_mode="HTML",
+    return tg_post(token, "sendMessage", dict(base, text=caption(4096), parse_mode="HTML",
                                               reply_markup=buttons, link_preview_options={"is_disabled": True})).ok
 
 

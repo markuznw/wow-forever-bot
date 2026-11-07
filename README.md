@@ -6,7 +6,7 @@ Gira gratis su GitHub Actions, senza server.
 **Fonte:** le news di [Wowhead](https://www.wowhead.com/news) che parlano di Forever, in lingua originale (inglese).
 Ogni messaggio ha l'immagine dell'articolo (se c'è), il titolo in grassetto, la data con gli hashtag, il testo in una citazione espandibile (elenchi compresi) e il pulsante "Leggi su Wowhead".
 
-**Blue post:** i messaggi dello staff Blizzard sulla sezione WoW: Forever del forum ufficiale vengono pubblicati come **immagine in stile "blue post"** (testo azzurro, autore e ruolo). I post lunghi diventano un album di più immagini, tagliate tra una riga e l'altra. La didascalia contiene un riassunto con punti e sottopunti, più i link a Wowhead (blue tracker) e al forum. Per disattivarli crea la variabile `BLUE_POSTS` con valore `off`.
+**Blue post:** i messaggi dello staff Blizzard sulla sezione WoW: Forever del forum ufficiale vengono pubblicati come **immagine in stile "blue post"** (testo azzurro, autore e ruolo). I post lunghi diventano un album di più immagini (massimo 10), tagliate tra una riga e l'altra, seguito da un messaggio con il riassunto a punti e i pulsanti Wowhead/Forum. I post corti sono un'immagine con il riassunto nella didascalia. Per disattivarli crea la variabile `BLUE_POSTS` con valore `off`.
 Se nel repo (nella cartella principale o in `assets/`) c'è un'immagine con "logo" nel nome (png, webp, avif o jpg), viene mostrata nell'intestazione dell'immagine; altrimenti viene usato il logo di WoW: Forever scaricato online (indirizzo modificabile con la variabile `LOGO_URL`).
 
 **Notifiche:** i messaggi vengono inviati silenziosi (senza suono/notifica). Per riattivare le notifiche crea la variabile `SILENT` con valore `off`.

@@ -190,12 +190,16 @@ def render_pages(page_html: str) -> list[bytes]:
                 safe.append((reach + t) / 2)
             reach = b if reach is None else max(reach, b)
         cuts, start = [top], top
-        while bottom - start > PAGE_PX and len(cuts) < MAX_PAGES:
+        while bottom - start > PAGE_PX:
             options = [y for y in safe if start + PAGE_PX * 0.5 < y <= start + PAGE_PX]
             y = max(options) if options else start + PAGE_PX
             cuts.append(y)
             start = y
-        cuts.append(bottom)
+            if len(cuts) > MAX_PAGES:  # troppo lungo per un album: il resto si legge dai link
+                print(f"[info] post molto lungo: mostrate solo le prime {MAX_PAGES} immagini", file=sys.stderr)
+                break
+        else:
+            cuts.append(bottom)
         pngs = []
         for a, b in zip(cuts, cuts[1:]):
             pngs.append(page.screenshot(type="png", full_page=True,
