@@ -2,7 +2,7 @@ name: WoW Forever news → Telegram
 
 on:
   schedule:
-    - cron: "*/20 * * * *"   # ogni 20 minuti
+    - cron: "7,27,47 * * * *"   # ogni 20 minuti (minuti meno affollati di :00/:20/:40)
   workflow_dispatch:          # avvio manuale dal tab Actions
 
 permissions:
