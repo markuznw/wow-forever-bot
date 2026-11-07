@@ -26,15 +26,13 @@ import requests
 FEEDS = [
     # (nome mostrato, url, serve il filtro parola chiave?)
     ("Wowhead", "https://www.wowhead.com/news/rss/all", True),
-    ("Warcraft Tavern", "https://www.warcrafttavern.com/feed/", True),
-    ("Google News", "https://news.google.com/rss/search?q=%22World+of+Warcraft:+Forever%22+OR+%22WoW+Forever%22&hl=en-US&gl=US&ceid=US:en", True),
-    ("Google News IT", "https://news.google.com/rss/search?q=%22WoW+Forever%22+OR+%22World+of+Warcraft:+Forever%22&hl=it&gl=IT&ceid=IT:it", True),
 ]
 
 KEYWORD = re.compile(r"\bforever\b", re.I)
 STATE_FILE = Path(__file__).with_name("seen.json")
 MAX_SEEN = 2000          # quante chiavi ricordare
 MAX_POSTS_PER_RUN = 10   # evita di inondare il canale
+SUMMARY_CHARS = 600      # lunghezza massima del testo sotto il titolo
 TARGET_LANG = os.environ.get("TRANSLATE_TO", "it").strip()
 if TARGET_LANG.lower() in ("", "off", "no", "none"):
     TARGET_LANG = ""  # traduzione disattivata
@@ -61,20 +59,39 @@ def translate(text: str) -> str:
     """Traduce in TARGET_LANG con Google Translate (gratuito). In caso di errore restituisce l'originale."""
     if not text or not TARGET_LANG:
         return text
-    try:
-        r = requests.get(
-            "https://translate.googleapis.com/translate_a/single",
-            params={"client": "gtx", "sl": "auto", "tl": TARGET_LANG, "dt": "t", "q": text},
-            headers={"User-Agent": UA}, timeout=15,
-        )
-        r.raise_for_status()
-        data = r.json()
-        if data[2] == TARGET_LANG:
-            return text
-        return "".join(part[0] for part in data[0] if part and part[0]) or text
-    except Exception as ex:
-        print(f"[warn] traduzione non riuscita: {ex}", file=sys.stderr)
-        return text
+    for attempt in range(3):
+        try:
+            r = requests.get(
+                "https://translate.googleapis.com/translate_a/single",
+                params={"client": "gtx", "sl": "auto", "tl": TARGET_LANG, "dt": "t", "q": text},
+                headers={"User-Agent": UA}, timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json()
+            if data[2] == TARGET_LANG:
+                return text
+            return "".join(part[0] for part in data[0] if part and part[0]) or text
+        except Exception as ex:
+            if attempt == 2:
+                print(f"[warn] traduzione non riuscita, uso il testo originale: {ex}", file=sys.stderr)
+                return text
+            time.sleep(3 * (attempt + 1))
+
+
+def find_image(e, body: str):
+    """Cerca l'immagine dell'articolo: media RSS, enclosure o primo <img> nel testo."""
+    for key in ("media_content", "media_thumbnail"):
+        for m in e.get(key) or []:
+            if m.get("url"):
+                return m["url"]
+    for enc in e.get("enclosures") or []:
+        if enc.get("type", "").startswith("image") and enc.get("href"):
+            return enc["href"]
+    m = re.search(r'<img[^>]+src=["\']([^"\']+)', body or "")
+    if m:
+        u = html.unescape(m.group(1))
+        return "https:" + u if u.startswith("//") else u
+    return None
 
 
 def is_forever(e) -> bool:
@@ -104,18 +121,15 @@ def collect():
             if need_kw and not is_forever(e):
                 continue
             ts = e.get("published_parsed") or e.get("updated_parsed")
-            title, source = e.title, name
-            if name.startswith("Google"):
-                pub = (e.get("source") or {}).get("title")
-                if pub:
-                    source = pub
-                    if title.endswith(" - " + pub):
-                        title = title[: -len(pub) - 3]
+            body = e.get("summary", "")
+            if e.get("content"):
+                body = max((c.get("value", "") for c in e.content), key=len, default=body)
             items.append({
-                "source": source,
-                "title": clean(title, 200),
+                "source": name,
+                "title": clean(e.title, 200),
                 "link": e.link,
-                "summary": "" if name.startswith("Google") else clean(e.get("summary", "")),
+                "summary": clean(re.sub(r"(?i)(continue reading|read more|leggi tutto).*$", "", body), SUMMARY_CHARS),
+                "image": find_image(e, body),
                 "ts": time.mktime(ts) if ts else 0,
             })
         print(f"[info] {name}: {len(feed.entries)} voci lette")
@@ -136,21 +150,45 @@ def parse_target(raw: str):
     return raw, topic
 
 
+def build_text(item, limit):
+    title = html.escape(translate(item["title"]), quote=False)
+    link = html.escape(item["link"], quote=True)
+    footer = f'\n\n🔗 <a href="{link}">Leggi su {html.escape(item["source"])}</a>'
+    summary = translate(item["summary"]) if item["summary"] else ""
+    while True:
+        text = f"📰 <b>{title}</b>"
+        if summary:
+            text += f"\n\n<blockquote>{html.escape(summary, quote=False)}</blockquote>"
+        text += footer
+        if len(re.sub(r"<[^>]+>", "", html.unescape(text))) <= limit or not summary:
+            return text
+        summary = summary[: max(0, len(summary) - 80)].rsplit(" ", 1)[0] + "…"
+
+
 def send(token, chat, item, topic=None):
-    text = f"<b>{html.escape(translate(item['title']))}</b>"
-    if item["summary"]:
-        text += f"\n\n{html.escape(translate(item['summary']))}"
-    text += f"\n\n🔗 <a href=\"{html.escape(item['link'], quote=True)}\">{html.escape(item['source'])}</a>"
+    photo = item.get("image")
+    text = build_text(item, 1000 if photo else 4000)
     if os.environ.get("DRY_RUN"):
-        print("---\n" + text)
+        print("---" + (f"\n[foto] {photo}" if photo else "") + "\n" + text)
         return True
-    payload = {"chat_id": chat, "text": text, "parse_mode": "HTML"}
+    method = "sendPhoto" if photo else "sendMessage"
+    payload = {"chat_id": chat, "parse_mode": "HTML"}
+    if photo:
+        payload.update(photo=photo, caption=text)
+    else:
+        payload.update(text=text, link_preview_options={"url": item["link"], "prefer_large_media": True})
     if topic:
         payload["message_thread_id"] = int(topic)
-    for _ in range(3):
+    for _ in range(4):
         r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=20
+            f"https://api.telegram.org/bot{token}/{method}", json=payload, timeout=20
         )
+        if r.status_code == 400 and method == "sendPhoto" and "thread" not in r.text.lower():
+            # immagine non valida per Telegram: invia solo il testo
+            print(f"[warn] foto non accettata ({r.text}), invio senza immagine", file=sys.stderr)
+            method = "sendMessage"
+            payload.pop("photo"); payload["text"] = payload.pop("caption")
+            continue
         if r.status_code == 400 and "thread not found" in r.text.lower() and topic:
             print(f"[warn] argomento {topic} non trovato, invio nel gruppo principale", file=sys.stderr)
             payload.pop("message_thread_id")

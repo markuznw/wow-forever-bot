@@ -3,10 +3,9 @@
 Bot che ogni 20 minuti raccoglie le news su **World of Warcraft: Forever** e le pubblica su un canale Telegram.
 Gira gratis su GitHub Actions, senza server.
 
-**Fonti:** Wowhead, Warcraft Tavern e Google News (in inglese e in italiano).
-Le news in inglese vengono tradotte automaticamente in italiano con Google Translate.
+**Fonte:** le news di [Wowhead](https://www.wowhead.com/news) che parlano di Forever, tradotte automaticamente in italiano con Google Translate.
+Ogni messaggio ha il titolo in grassetto, il riassunto in un blocco citazione, l'immagine dell'articolo (se c'è) e il link a Wowhead.
 Tiene solo le notizie che parlano di "Forever" e non ripubblica le notizie che ha già inviato.
-Se una fonte non risponde, la salta e continua con le altre.
 
 ## Configurazione (una volta sola)
 
