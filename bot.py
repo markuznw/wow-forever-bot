@@ -32,8 +32,9 @@ KEYWORD = re.compile(r"\bforever\b", re.I)
 STATE_FILE = Path(__file__).with_name("seen.json")
 MAX_SEEN = 2000          # quante chiavi ricordare
 MAX_POSTS_PER_RUN = 10   # evita di inondare il canale
-SUMMARY_CHARS = 600      # lunghezza massima del testo sotto il titolo
-TARGET_LANG = os.environ.get("TRANSLATE_TO", "it").strip()
+SUMMARY_CHARS = 900      # lunghezza massima del testo sotto il titolo
+FIRST_RUN_POSTS = 10     # news pubblicate al primo avvio
+TARGET_LANG = os.environ.get("TRANSLATE_TO", "off").strip()  # es. "it" per tradurre
 if TARGET_LANG.lower() in ("", "off", "no", "none"):
     TARGET_LANG = ""  # traduzione disattivata
 UA = "Mozilla/5.0 (compatible; wow-forever-telegram-bot/1.0)"
@@ -53,6 +54,51 @@ def clean(text: str, limit: int = 300) -> str:
     text = re.sub(r"<[^>]+>", " ", text or "")
     text = html.unescape(re.sub(r"\s+", " ", text)).strip()
     return text if len(text) <= limit else text[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def clean_structured(raw: str, limit: int) -> str:
+    """Come clean() ma mantiene paragrafi ed elenchi puntati."""
+    t = raw or ""
+    t = re.sub(r"(?is)<(script|style|figure|figcaption)[^>]*>.*?</\1>", " ", t)
+    t = re.sub(r"(?i)<li[^>]*>", "\n• ", t)
+    t = re.sub(r"(?i)<br\s*/?>|</(p|div|li|ul|ol|h[1-6]|tr)>", "\n", t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = html.unescape(t)
+    t = re.sub(r"(?im)^.*(continue reading|read more|leggi tutto).*$", "", t)
+    lines = [re.sub(r"[ \t\xa0]+", " ", l).strip() for l in t.split("\n")]
+    lines = [l for l in lines if l and l != "•"]
+    out = []
+    for l in lines:
+        if not l.startswith("•") and out and out[-1].startswith("•"):
+            out.append("")  # riga vuota tra elenco e paragrafo
+        elif not l.startswith("•") and out:
+            out.append("")
+        out.append(l)
+    t = "\n".join(out).strip()
+    if len(t) <= limit:
+        return t
+    cut = t[:limit]
+    cut = cut.rsplit("\n", 1)[0] if cut.count("\n") and len(cut.rsplit("\n", 1)[0]) > limit * 0.6 else cut.rsplit(" ", 1)[0]
+    return cut.rstrip() + " …"
+
+
+MONTHS = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio",
+          "agosto", "settembre", "ottobre", "novembre", "dicembre"]
+TAGS = [
+    (r"hotfix", "#Hotfix"), (r"patch notes?|patch\b", "#Patch"), (r"\bguide|\bguida", "#Guida"),
+    (r"\bpvp\b|battleground|arena", "#PvP"), (r"\braid", "#Raid"), (r"dungeon", "#Dungeon"),
+    (r"\bevent|\bevento", "#Evento"), (r"blue post|developer|devs?\b|interview", "#Blizzard"),
+    (r"class|warrior|paladin|hunter|rogue|priest|shaman|mage|warlock|druid", "#Classi"),
+    (r"legendary|leggendari", "#Leggendari"), (r"maintenance|server|outage|queue", "#Server"),
+]
+
+
+def tags_for(title: str):
+    found = ["#WoWForever"]
+    for pat, tag in TAGS:
+        if re.search(pat, title, re.I) and tag not in found:
+            found.append(tag)
+    return " ".join(found[:4])
 
 
 def translate(text: str) -> str:
@@ -128,7 +174,9 @@ def collect():
                 "source": name,
                 "title": clean(e.title, 200),
                 "link": e.link,
-                "summary": clean(re.sub(r"(?i)(continue reading|read more|leggi tutto).*$", "", body), SUMMARY_CHARS),
+                "summary": clean_structured(body, SUMMARY_CHARS),
+                "date": f"{ts.tm_mday} {MONTHS[ts.tm_mon - 1]} {ts.tm_year}" if ts else "",
+                "tags": tags_for(e.title),
                 "image": find_image(e, body),
                 "ts": time.mktime(ts) if ts else 0,
             })
@@ -152,31 +200,36 @@ def parse_target(raw: str):
 
 def build_text(item, limit):
     title = html.escape(translate(item["title"]), quote=False)
-    link = html.escape(item["link"], quote=True)
-    footer = f'\n\n🔗 <a href="{link}">Leggi su {html.escape(item["source"])}</a>'
+    meta = " · ".join(x for x in [f"🗓 {item['date']}" if item.get("date") else "", item.get("tags", "")] if x)
     summary = translate(item["summary"]) if item["summary"] else ""
     while True:
-        text = f"📰 <b>{title}</b>"
+        text = f"<b>{title}</b>"
+        if meta:
+            text += f"\n<i>{html.escape(meta, quote=False)}</i>"
         if summary:
-            text += f"\n\n<blockquote>{html.escape(summary, quote=False)}</blockquote>"
-        text += footer
+            text += f"\n\n<blockquote expandable>{html.escape(summary, quote=False)}</blockquote>"
         if len(re.sub(r"<[^>]+>", "", html.unescape(text))) <= limit or not summary:
             return text
-        summary = summary[: max(0, len(summary) - 80)].rsplit(" ", 1)[0] + "…"
+        summary = summary[: max(0, len(summary) - 60)].rsplit(" ", 1)[0].rstrip() + " …"
 
 
 def send(token, chat, item, topic=None):
     photo = item.get("image")
     text = build_text(item, 1000 if photo else 4000)
     if os.environ.get("DRY_RUN"):
-        print("---" + (f"\n[foto] {photo}" if photo else "") + "\n" + text)
+        print("---" + (f"\n[foto] {photo}" if photo else "") + "\n" + text + f"\n[pulsante] {item['link']}")
         return True
     method = "sendPhoto" if photo else "sendMessage"
-    payload = {"chat_id": chat, "parse_mode": "HTML"}
+    payload = {
+        "chat_id": chat,
+        "parse_mode": "HTML",
+        "reply_markup": {"inline_keyboard": [[{"text": f"📖 Leggi su {item['source']}", "url": item["link"]}]]},
+    }
     if photo:
         payload.update(photo=photo, caption=text)
     else:
-        payload.update(text=text, link_preview_options={"url": item["link"], "prefer_large_media": True})
+        payload.update(text=text, link_preview_options={"url": item["link"], "prefer_large_media": True,
+                                                        "show_above_text": True})
     if topic:
         payload["message_thread_id"] = int(topic)
     for _ in range(4):
@@ -231,8 +284,8 @@ def main():
         new.append((it, keys))
 
     if first_run:
-        # Primo avvio: pubblica solo le ultime 3 per non inondare il canale.
-        to_post = new[-3:]
+        # Primo avvio: pubblica solo le ultime FIRST_RUN_POSTS per non inondare il canale.
+        to_post = new[-FIRST_RUN_POSTS:]
     else:
         to_post = new[-MAX_POSTS_PER_RUN:]
 

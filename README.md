@@ -3,8 +3,8 @@
 Bot che ogni 20 minuti raccoglie le news su **World of Warcraft: Forever** e le pubblica su un canale Telegram.
 Gira gratis su GitHub Actions, senza server.
 
-**Fonte:** le news di [Wowhead](https://www.wowhead.com/news) che parlano di Forever, tradotte automaticamente in italiano con Google Translate.
-Ogni messaggio ha il titolo in grassetto, il riassunto in un blocco citazione, l'immagine dell'articolo (se c'è) e il link a Wowhead.
+**Fonte:** le news di [Wowhead](https://www.wowhead.com/news) che parlano di Forever, in lingua originale (inglese).
+Ogni messaggio ha l'immagine dell'articolo (se c'è), il titolo in grassetto, la data con gli hashtag, il testo in una citazione espandibile (elenchi compresi) e il pulsante "Leggi su Wowhead".
 Tiene solo le notizie che parlano di "Forever" e non ripubblica le notizie che ha già inviato.
 
 ## Configurazione (una volta sola)
@@ -18,12 +18,12 @@ Tiene solo le notizie che parlano di "Forever" e non ripubblica le notizie che h
 
 Se il bot non riesce ad accedere al gruppo o al canale, l'esecuzione fallisce (in rosso) e il log spiega il motivo.
 
-Al primo avvio pubblica solo le 3 news più recenti. Da lì in poi pubblica solo quelle nuove, fino a 10 per giro.
+Al primo avvio pubblica le 10 news più recenti. Da lì in poi pubblica solo quelle nuove, fino a 10 per giro.
 
 ## Personalizzare
 
 - **Fonti**: modifica la lista `FEEDS` in `bot.py`.
-- **Lingua**: per cambiare la lingua di destinazione aggiungi la variabile `TRANSLATE_TO` (es. `en`); per disattivare la traduzione impostala a `off`. La imposti in *Settings → Secrets and variables → Actions → Variables*.
+- **Traduzione automatica (opzionale, spenta di default)**: crea la variabile `TRANSLATE_TO` con valore `it` in *Settings → Secrets and variables → Actions → Variables*. Usa Google Translate gratuito; se non risponde il bot pubblica il testo originale. Per spegnerla elimina la variabile o mettila a `off`.
 - **Frequenza**: modifica la riga `cron` in `.github/workflows/bot.yml`.
 - **Prova in locale**: `pip install -r requirements.txt && DRY_RUN=1 python bot.py`. Stampa i messaggi invece di inviarli.
 
