@@ -27,9 +27,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
           TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
+          TRANSLATE_TO: ${{ vars.TRANSLATE_TO || 'it' }}
         run: python bot.py
       - name: Salva lo stato (news già pubblicate)
+        if: always()
         run: |
+          [ -f seen.json ] || exit 0
           git config user.name "github-actions[bot]"
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
           git add seen.json

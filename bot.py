@@ -27,7 +27,6 @@ FEEDS = [
     # (nome mostrato, url, serve il filtro parola chiave?)
     ("Wowhead", "https://www.wowhead.com/news/rss/all", True),
     ("Warcraft Tavern", "https://www.warcrafttavern.com/feed/", True),
-    ("Blizzard", "https://news.blizzard.com/en-us/rss/world-of-warcraft", True),
     ("Google News", "https://news.google.com/rss/search?q=%22World+of+Warcraft:+Forever%22+OR+%22WoW+Forever%22&hl=en-US&gl=US&ceid=US:en", True),
     ("Google News IT", "https://news.google.com/rss/search?q=%22WoW+Forever%22+OR+%22World+of+Warcraft:+Forever%22&hl=it&gl=IT&ceid=IT:it", True),
 ]
@@ -36,6 +35,9 @@ KEYWORD = re.compile(r"\bforever\b", re.I)
 STATE_FILE = Path(__file__).with_name("seen.json")
 MAX_SEEN = 2000          # quante chiavi ricordare
 MAX_POSTS_PER_RUN = 10   # evita di inondare il canale
+TARGET_LANG = os.environ.get("TRANSLATE_TO", "it").strip()
+if TARGET_LANG.lower() in ("", "off", "no", "none"):
+    TARGET_LANG = ""  # traduzione disattivata
 UA = "Mozilla/5.0 (compatible; wow-forever-telegram-bot/1.0)"
 
 
@@ -53,6 +55,26 @@ def clean(text: str, limit: int = 300) -> str:
     text = re.sub(r"<[^>]+>", " ", text or "")
     text = html.unescape(re.sub(r"\s+", " ", text)).strip()
     return text if len(text) <= limit else text[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def translate(text: str) -> str:
+    """Traduce in TARGET_LANG con Google Translate (gratuito). In caso di errore restituisce l'originale."""
+    if not text or not TARGET_LANG:
+        return text
+    try:
+        r = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "auto", "tl": TARGET_LANG, "dt": "t", "q": text},
+            headers={"User-Agent": UA}, timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data[2] == TARGET_LANG:
+            return text
+        return "".join(part[0] for part in data[0] if part and part[0]) or text
+    except Exception as ex:
+        print(f"[warn] traduzione non riuscita: {ex}", file=sys.stderr)
+        return text
 
 
 def is_forever(e) -> bool:
@@ -82,9 +104,16 @@ def collect():
             if need_kw and not is_forever(e):
                 continue
             ts = e.get("published_parsed") or e.get("updated_parsed")
+            title, source = e.title, name
+            if name.startswith("Google"):
+                pub = (e.get("source") or {}).get("title")
+                if pub:
+                    source = pub
+                    if title.endswith(" - " + pub):
+                        title = title[: -len(pub) - 3]
             items.append({
-                "source": name,
-                "title": clean(e.title, 200),
+                "source": source,
+                "title": clean(title, 200),
                 "link": e.link,
                 "summary": "" if name.startswith("Google") else clean(e.get("summary", "")),
                 "ts": time.mktime(ts) if ts else 0,
@@ -108,9 +137,9 @@ def parse_target(raw: str):
 
 
 def send(token, chat, item, topic=None):
-    text = f"<b>{html.escape(item['title'])}</b>"
+    text = f"<b>{html.escape(translate(item['title']))}</b>"
     if item["summary"]:
-        text += f"\n\n{html.escape(item['summary'])}"
+        text += f"\n\n{html.escape(translate(item['summary']))}"
     text += f"\n\n🔗 <a href=\"{html.escape(item['link'], quote=True)}\">{html.escape(item['source'])}</a>"
     if os.environ.get("DRY_RUN"):
         print("---\n" + text)
@@ -142,6 +171,15 @@ def main():
     if not os.environ.get("DRY_RUN") and not (token and chat):
         sys.exit("Mancano TELEGRAM_BOT_TOKEN e/o TELEGRAM_CHANNEL")
     print(f"[info] destinazione: chat {chat}" + (f", argomento {topic}" if topic else ""))
+    if not os.environ.get("DRY_RUN"):
+        r = requests.post(f"https://api.telegram.org/bot{token}/getChat", json={"chat_id": chat}, timeout=20)
+        if not r.ok:
+            sys.exit(
+                f"[error] Il bot non riesce ad accedere alla chat {chat}: {r.text}\n"
+                "Controlla che il bot sia stato aggiunto al gruppo/canale (meglio come amministratore) "
+                "e che TELEGRAM_CHANNEL sia corretto."
+            )
+        print(f"[info] chat trovata: {r.json()['result'].get('title')}")
 
     state = load_state()
     seen = set(state["seen"])
@@ -160,15 +198,23 @@ def main():
     else:
         to_post = new[-MAX_POSTS_PER_RUN:]
 
-    posted = 0
-    for it, _ in to_post:
+    posted, failed = 0, []
+    for it, keys in to_post:
         if send(token, chat, it, topic):
             posted += 1
             time.sleep(3)
-    print(f"[info] nuove: {len(new)}, pubblicate: {posted}")
+        else:
+            failed.append(keys)
+    print(f"[info] nuove: {len(new)}, pubblicate: {posted}, fallite: {len(failed)}")
 
-    order = state["seen"] + [k for _, ks in new for k in sorted(ks) if k not in state["seen"]]
-    STATE_FILE.write_text(json.dumps({"initialized": True, "seen": order[-MAX_SEEN:]}, indent=0))
+    # Le news non inviate non vengono segnate come viste: riproverà al prossimo giro.
+    skip = set().union(*failed) if failed else set()
+    old = set(state["seen"])
+    order = state["seen"] + [k for _, ks in new for k in sorted(ks) if k not in old and k not in skip]
+    STATE_FILE.write_text(json.dumps({"initialized": state.get("initialized") or posted > 0 or not to_post,
+                                      "seen": order[-MAX_SEEN:]}, indent=0))
+    if failed:
+        sys.exit(f"[error] {len(failed)} news non inviate, vedi gli errori sopra")
 
 
 if __name__ == "__main__":

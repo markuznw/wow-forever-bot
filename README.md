@@ -3,7 +3,8 @@
 Bot che ogni 20 minuti raccoglie le news su **World of Warcraft: Forever** e le pubblica su un canale Telegram.
 Gira gratis su GitHub Actions, senza server.
 
-**Fonti:** Wowhead, Warcraft Tavern, Blizzard News e Google News (in inglese e in italiano).
+**Fonti:** Wowhead, Warcraft Tavern e Google News (in inglese e in italiano).
+Le news in inglese vengono tradotte automaticamente in italiano con Google Translate.
 Tiene solo le notizie che parlano di "Forever" e non ripubblica le notizie che ha già inviato.
 Se una fonte non risponde, la salta e continua con le altre.
 
@@ -16,11 +17,14 @@ Se una fonte non risponde, la salta e continua con le altre.
    - `TELEGRAM_CHANNEL` = `@nomedelcanale`, oppure il link di un argomento di un gruppo (es. `https://t.me/c/1234567890/39`): il bot pubblica in quell'argomento
 4. **Avvialo**: tab *Actions* → "WoW Forever news → Telegram" → *Run workflow*.
 
+Se il bot non riesce ad accedere al gruppo o al canale, l'esecuzione fallisce (in rosso) e il log spiega il motivo.
+
 Al primo avvio pubblica solo le 3 news più recenti. Da lì in poi pubblica solo quelle nuove, fino a 10 per giro.
 
 ## Personalizzare
 
 - **Fonti**: modifica la lista `FEEDS` in `bot.py`.
+- **Lingua**: per cambiare la lingua di destinazione aggiungi la variabile `TRANSLATE_TO` (es. `en`); per disattivare la traduzione impostala a `off`. La imposti in *Settings → Secrets and variables → Actions → Variables*.
 - **Frequenza**: modifica la riga `cron` in `.github/workflows/bot.yml`.
 - **Prova in locale**: `pip install -r requirements.txt && DRY_RUN=1 python bot.py`. Stampa i messaggi invece di inviarli.
 
