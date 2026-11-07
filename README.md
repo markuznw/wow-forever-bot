@@ -3,6 +3,10 @@
 Bot che ogni 20 minuti raccoglie le news su **World of Warcraft: Forever** e le pubblica su un canale Telegram.
 Gira gratis su GitHub Actions, senza server.
 
+**Come resta acceso:** ogni esecuzione dura circa 5 ore e mezza (controlla le news ogni 20 minuti) e alla fine avvia da sola quella successiva.
+Per avviarlo basta *Actions → Run workflow* una volta; per fermarlo, *Cancel run* sull'esecuzione in corso.
+Intervallo e durata si cambiano con `INTERVAL_MIN` e `RUN_FOR_MIN` in `.github/workflows/bot.yml`.
+
 **Fonte:** le news di [Wowhead](https://www.wowhead.com/news) che parlano di Forever, in lingua originale (inglese).
 Ogni messaggio ha l'immagine dell'articolo (se c'è), il titolo in grassetto, la data con gli hashtag, il testo in una citazione espandibile (elenchi compresi) e il pulsante "Leggi su Wowhead".
 
@@ -29,7 +33,6 @@ Al primo avvio pubblica le 10 news più recenti. Da lì in poi pubblica solo que
 
 - **Fonti**: modifica la lista `FEEDS` in `bot.py`.
 - **Traduzione automatica (opzionale, spenta di default)**: crea la variabile `TRANSLATE_TO` con valore `it` in *Settings → Secrets and variables → Actions → Variables*. Usa Google Translate gratuito; se non risponde il bot pubblica il testo originale. Per spegnerla elimina la variabile o mettila a `off`.
-- **Frequenza**: modifica la riga `cron` in `.github/workflows/bot.yml`. GitHub non garantisce l'orario esatto: le esecuzioni programmate possono partire in ritardo o, su repo nuovi, iniziare dopo un po'.
 - **Prova in locale**: `pip install -r requirements.txt && DRY_RUN=1 python bot.py`. Stampa i messaggi invece di inviarli.
 
 > GitHub sospende i workflow programmati se il repo non riceve attività per 60 giorni.
