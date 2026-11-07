@@ -23,6 +23,8 @@ from pathlib import Path
 import feedparser
 import requests
 
+import blue
+
 FEEDS = [
     # (nome mostrato, url, serve il filtro parola chiave?)
     ("Wowhead", "https://www.wowhead.com/news/rss/all", True),
@@ -34,6 +36,8 @@ MAX_SEEN = 2000          # quante chiavi ricordare
 MAX_POSTS_PER_RUN = 10   # evita di inondare il canale
 SUMMARY_CHARS = 900      # lunghezza massima del testo sotto il titolo
 FIRST_RUN_POSTS = 10     # news pubblicate al primo avvio
+FIRST_RUN_BLUE = 5       # blue post pubblicati la prima volta
+BLUE_POSTS = os.environ.get("BLUE_POSTS", "on").lower() not in ("0", "off", "no", "false")
 TARGET_LANG = os.environ.get("TRANSLATE_TO", "off").strip()  # es. "it" per tradurre
 if TARGET_LANG.lower() in ("", "off", "no", "none"):
     TARGET_LANG = ""  # traduzione disattivata
@@ -213,7 +217,66 @@ def build_text(item, limit):
         summary = summary[: max(0, len(summary) - 60)].rsplit(" ", 1)[0].rstrip() + " …"
 
 
+def tg_post(token, method, payload, files=None):
+    """Chiama la Bot API gestendo argomento mancante e limiti di frequenza."""
+    for _ in range(4):
+        if files:
+            data = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in payload.items()}
+            r = requests.post(f"https://api.telegram.org/bot{token}/{method}", data=data, files=files, timeout=60)
+        else:
+            r = requests.post(f"https://api.telegram.org/bot{token}/{method}", json=payload, timeout=20)
+        if r.status_code == 400 and "thread not found" in r.text.lower() and "message_thread_id" in payload:
+            print("[warn] argomento non trovato, invio nel gruppo principale", file=sys.stderr)
+            payload.pop("message_thread_id")
+            continue
+        if r.status_code == 429:
+            time.sleep(r.json().get("parameters", {}).get("retry_after", 5) + 1)
+            continue
+        if not r.ok:
+            print(f"[error] Telegram {method} {r.status_code}: {r.text}", file=sys.stderr)
+        return r
+    return r
+
+
+def send_blue(token, chat, item, topic=None):
+    d = item["dt"]
+    date = f"{d.day} {MONTHS[d.month - 1]} {d.year}"
+    tags = " ".join(t for t in tags_for(item["title"]).split() if t != "#WoWForever")
+    caption = (
+        f"🔵 <b>Blue post</b> · {html.escape(item['author'], quote=False)} <i>({html.escape(item['role'], quote=False)})</i>\n"
+        f"<b>{html.escape(item['title'], quote=False)}</b>\n"
+        f"<i>🗓 {date} · #WoWForever #BluePost{(' ' + tags) if tags else ''}</i>"
+    )
+    buttons = {"inline_keyboard": [[
+        {"text": "📖 Leggi su Wowhead", "url": item["wowhead"]},
+        {"text": "💬 Forum", "url": item["link"]},
+    ]]}
+    png = blue.render(item, MONTHS)
+    if os.environ.get("DRY_RUN"):
+        out = os.environ.get("BLUE_PREVIEW_DIR")
+        if png and out:
+            Path(out, f"blue-{item['id']}.png").write_bytes(png)
+        print(f"---\n[blue post, immagine: {'sì' if png else 'no'}]\n{caption}\n[pulsanti] {item['link']} | {item['wowhead']}")
+        return True
+    payload = {"chat_id": chat, "parse_mode": "HTML", "reply_markup": buttons}
+    if topic:
+        payload["message_thread_id"] = int(topic)
+    if png:
+        r = tg_post(token, "sendPhoto", dict(payload, caption=caption),
+                    files={"photo": ("bluepost.png", png, "image/png")})
+        if r.ok:
+            return True
+        print("[warn] immagine del blue post rifiutata, invio come testo", file=sys.stderr)
+    text = caption
+    excerpt = clean_structured(item.get("excerpt", ""), 900)
+    if excerpt:
+        text += f"\n\n<blockquote expandable>{html.escape(excerpt, quote=False)}</blockquote>"
+    return tg_post(token, "sendMessage", dict(payload, text=text, link_preview_options={"is_disabled": True})).ok
+
+
 def send(token, chat, item, topic=None):
+    if item.get("kind") == "blue":
+        return send_blue(token, chat, item, topic)
     photo = item.get("image")
     text = build_text(item, 1000 if photo else 4000)
     if os.environ.get("DRY_RUN"):
@@ -288,6 +351,20 @@ def main():
         to_post = new[-FIRST_RUN_POSTS:]
     else:
         to_post = new[-MAX_POSTS_PER_RUN:]
+
+    # Blue post dal forum Blizzard
+    if BLUE_POSTS:
+        first_blue = not any(k.startswith("b:") for k in seen)
+        blue_new = []
+        for it in blue.fetch_blue_posts():
+            keys = {f"b:{it['id']}"}
+            if keys & seen:
+                continue
+            seen |= keys
+            blue_new.append((it, keys))
+        new += blue_new
+        to_post += blue_new[-(FIRST_RUN_BLUE if first_blue else MAX_POSTS_PER_RUN):]
+        to_post.sort(key=lambda x: x[0]["ts"])
 
     posted, failed = 0, []
     for it, keys in to_post:
