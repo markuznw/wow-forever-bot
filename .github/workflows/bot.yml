@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: main   # sempre il codice e lo stato più recenti, anche con "Re-run"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -48,6 +50,7 @@ jobs:
           end=$(( $(date +%s) + RUN_FOR_MIN * 60 ))
           while :; do
             echo "::group::Controllo delle $(date -u +%H:%M) UTC"
+            git pull -q --rebase origin main || echo "::warning::Aggiornamento dal repo non riuscito"
             python bot.py || echo "::warning::Questo giro non è andato a buon fine, riprovo al prossimo"
             if [ -f seen.json ]; then
               git add seen.json
