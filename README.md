@@ -16,6 +16,22 @@ Se nel repo (nella cartella principale o in `assets/`) c'è un'immagine con "log
 **Notifiche:** i messaggi vengono inviati silenziosi (senza suono/notifica). Per riattivare le notifiche crea la variabile `SILENT` con valore `off`.
 Tiene solo le notizie che parlano di "Forever" e non ripubblica le notizie che ha già inviato.
 
+## Stato dei server (WoW Forever EU)
+
+Ogni 5 minuti il bot controlla la pagina ufficiale [Server Status](https://worldofwarcraft.blizzard.com/en-gb/game/status/eu) di Blizzard
+per i mondi di WoW: Forever EU (Normal, PvP, Roleplay, Roleplay PvP) e scrive nel canale:
+
+- 🔴 quando uno o più server vanno offline
+- 🟢 quando tornano tutti online, con la durata del down
+
+Prima di avvisare ricontrolla dopo un minuto, per evitare falsi allarmi. Questi avvisi arrivano **con notifica**.
+
+Variabili opzionali (*Settings → Secrets and variables → Actions*):
+- `STATUS_TRACKER` = `off` per disattivarlo
+- `STATUS_REGION` = `us` / `kr` / `tw` per un'altra regione (default `eu`)
+- `STATUS_NOTIFY` = `off` per avvisi silenziosi
+- secret `STATUS_CHANNEL` per mandare gli avvisi in un altro canale/argomento (stesso formato di `TELEGRAM_CHANNEL`)
+
 ## Configurazione (una volta sola)
 
 1. **Crea il bot**: su Telegram scrivi a [@BotFather](https://t.me/BotFather), usa `/newbot` e copia il token.

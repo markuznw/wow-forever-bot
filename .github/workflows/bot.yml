@@ -19,7 +19,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  INTERVAL_MIN: 20        # minuti tra un controllo e l'altro
+  INTERVAL_MIN: 20        # minuti tra un controllo delle news e l'altro
+  STATUS_EVERY_MIN: 5     # minuti tra un controllo dello stato dei server e l'altro
   RUN_FOR_MIN: 330        # quanto resta acceso ogni esecuzione (limite GitHub: 360)
 
 jobs:
@@ -36,7 +37,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
 
-      - name: Pubblica le news (ogni ${{ env.INTERVAL_MIN }} minuti)
+      - name: News ogni ${{ env.INTERVAL_MIN }} min, stato server ogni ${{ env.STATUS_EVERY_MIN }} min
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
@@ -44,25 +45,35 @@ jobs:
           TRANSLATE_TO: ${{ vars.TRANSLATE_TO || 'off' }}
           BLUE_POSTS: ${{ vars.BLUE_POSTS || 'on' }}
           SILENT: ${{ vars.SILENT || 'on' }}
+          STATUS_TRACKER: ${{ vars.STATUS_TRACKER || 'on' }}
+          STATUS_REGION: ${{ vars.STATUS_REGION || 'eu' }}
+          STATUS_NOTIFY: ${{ vars.STATUS_NOTIFY || 'on' }}
+          STATUS_CHANNEL: ${{ secrets.STATUS_CHANNEL }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
           end=$(( $(date +%s) + RUN_FOR_MIN * 60 ))
+          news_every=$(( INTERVAL_MIN / STATUS_EVERY_MIN ))
+          i=0
           while :; do
-            echo "::group::Controllo delle $(date -u +%H:%M) UTC"
             git pull -q --rebase origin main || echo "::warning::Aggiornamento dal repo non riuscito"
-            python bot.py || echo "::warning::Questo giro non è andato a buon fine, riprovo al prossimo"
-            if [ -f seen.json ]; then
-              git add seen.json
-              if ! git diff --cached --quiet; then
-                git commit -q -m "Aggiorna news pubblicate [skip ci]"
-                git pull -q --rebase origin main && git push -q || echo "::warning::Salvataggio dello stato non riuscito"
-              fi
+            if [ "$STATUS_TRACKER" != "off" ]; then
+              python status.py || echo "::warning::Controllo dello stato dei server non riuscito"
             fi
-            echo "::endgroup::"
-            next=$(( $(date +%s) + INTERVAL_MIN * 60 ))
+            if [ $(( i % news_every )) -eq 0 ]; then
+              echo "::group::News delle $(date -u +%H:%M) UTC"
+              python bot.py || echo "::warning::Questo giro non è andato a buon fine, riprovo al prossimo"
+              echo "::endgroup::"
+            fi
+            for f in seen.json status.json; do if [ -f "$f" ]; then git add "$f"; fi; done
+            if ! git diff --cached --quiet; then
+              git commit -q -m "Aggiorna stato del bot [skip ci]"
+              git pull -q --rebase origin main && git push -q || echo "::warning::Salvataggio dello stato non riuscito"
+            fi
+            i=$(( i + 1 ))
+            next=$(( $(date +%s) + STATUS_EVERY_MIN * 60 ))
             [ "$next" -ge "$end" ] && break
-            sleep $(( INTERVAL_MIN * 60 ))
+            sleep $(( STATUS_EVERY_MIN * 60 ))
           done
 
       - name: Avvia l'esecuzione successiva
