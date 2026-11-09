@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Tracker dello stato dei server di WoW: Forever (EU) con avvisi su Telegram.
 
-Apre la pagina pubblica "Server Status" di Blizzard con Chrome e ne legge i dati,
-indirizzando la richiesta della pagina sui server di Forever della regione scelta.
+Legge i dati della pagina pubblica "Server Status" di Blizzard con la stessa richiesta che fa la pagina
+(veloce, senza browser). Se Blizzard la cambia, ripiega su Chrome: apre la pagina, indirizza la sua
+richiesta sui server di Forever della regione scelta e impara il nuovo formato per i controlli successivi.
 Avvisa quando un server va offline e quando tornano tutti online.
 
 Variabili d'ambiente (oltre a quelle del bot delle news):
@@ -17,6 +18,8 @@ import sys
 import time
 from pathlib import Path
 
+import requests
+
 import bot
 
 REGION = os.environ.get("STATUS_REGION", "eu").strip().lower() or "eu"
@@ -24,12 +27,46 @@ SLUG = f"forever-{REGION}"
 PAGE = f"https://worldofwarcraft.blizzard.com/en-gb/game/status/{REGION}"
 STATE_FILE = Path(__file__).with_name("status.json")
 NOTIFY = os.environ.get("STATUS_NOTIFY", "on").lower() not in ("0", "off", "no", "false")
+GRAPHQL = "https://worldofwarcraft.blizzard.com/en-gb/graphql"
+DEFAULT_DOC_HASH = "e890f42a5375f136b9f9165408fb2bc372cc5f88be0b21e7dc681a70d9999c67"  # GetRealmStatusData
+UA = "wow-forever-telegram-bot/1.0 (+https://github.com/markuznw/wow-forever-bot)"
 CONFIRM_DELAY = 60  # secondi: prima di avvisare ricontrolla, per evitare falsi allarmi
 REGION_NAME = {"eu": "EU", "us": "US", "kr": "KR", "tw": "TW"}.get(REGION, REGION.upper())
 
 
-def fetch_status():
-    """Restituisce {nome server: online?} oppure None se la pagina non risponde."""
+LEARNED = {}  # codice della richiesta imparato dalla pagina (se Blizzard lo cambia)
+
+
+def fetch_direct(doc_hash):
+    """Richiesta diretta, nel formato usato dalla pagina: veloce, senza browser."""
+    body = {"operationName": "GetRealmStatusData",
+            "variables": {"input": {"compoundRegionGameVersionSlug": SLUG}},
+            "extensions": {"clientLibrary": {"name": "@apollo/client", "version": "4.1.7"},
+                           "persistedQuery": {"version": 1, "sha256Hash": doc_hash}}}
+    headers = {"accept": "application/graphql-response+json,application/json;q=0.9",
+               "content-type": "application/json", "user-agent": UA}
+    try:
+        r = requests.post(GRAPHQL, json=body, headers=headers, timeout=20)
+        realms = (r.json().get("data") or {}).get("Realms") if r.ok else None
+        if realms:
+            return {x["name"]: bool(x.get("online")) for x in realms}
+        print(f"[warn] richiesta diretta non accettata ({r.status_code}): {r.text[:120]}", file=sys.stderr)
+    except Exception as ex:
+        print(f"[warn] richiesta diretta non riuscita: {ex}", file=sys.stderr)
+    return None
+
+
+def fetch_status(doc_hash=DEFAULT_DOC_HASH):
+    """Restituisce {nome server: online?} oppure None se Blizzard non risponde."""
+    realms = fetch_direct(doc_hash)
+    if realms:
+        return realms
+    print("[info] uso la pagina con Chrome", file=sys.stderr)
+    return fetch_with_browser()
+
+
+def fetch_with_browser():
+    """Ripiego: apre la pagina pubblica con Chrome e ne legge i dati."""
     from playwright.sync_api import sync_playwright
 
     realms = {}
@@ -39,6 +76,10 @@ def fetch_status():
         try:
             body = json.loads(route.request.post_data or "{}")
             inp = body.get("variables", {}).get("input", {})
+            if body.get("operationName") == "GetRealmStatusData":
+                h = body.get("extensions", {}).get("persistedQuery", {}).get("sha256Hash")
+                if h:
+                    LEARNED["doc_hash"] = h
             if "compoundRegionGameVersionSlug" in inp:
                 inp["compoundRegionGameVersionSlug"] = SLUG
                 return route.continue_(post_data=json.dumps(body))
@@ -110,24 +151,34 @@ def send(text):
     return bot.tg_post(token, "sendMessage", payload).ok
 
 
+def save_state(data):
+    if LEARNED.get("doc_hash"):
+        data["doc_hash"] = LEARNED["doc_hash"]
+    STATE_FILE.write_text(json.dumps(data, indent=1))
+
+
 def main():
-    realms = fetch_status()
+    state = load_state()
+    doc_hash = state.get("doc_hash") or DEFAULT_DOC_HASH
+    realms = fetch_status(doc_hash)
     if realms is None:
         print("[warn] stato dei server non letto, riprovo al prossimo controllo", file=sys.stderr)
         return
-    state = load_state()
+    if LEARNED.get("doc_hash") and LEARNED["doc_hash"] != state.get("doc_hash"):
+        state["doc_hash"] = LEARNED["doc_hash"]
+        save_state(dict(state))
     prev = state.get("realms")
     print(f"[info] server Forever {REGION_NAME}: " + ", ".join(f"{n}={'up' if u else 'down'}" for n, u in sorted(realms.items())))
 
     if prev is None:  # primo avvio: salva lo stato senza avvisare
-        STATE_FILE.write_text(json.dumps({"realms": realms, "down_since": None if all(realms.values()) else time.time()}, indent=1))
+        save_state({"realms": realms, "down_since": None if all(realms.values()) else time.time(), "doc_hash": doc_hash})
         return
     if realms == prev:
         return
 
     # cambiamento: ricontrolla dopo un minuto prima di avvisare
     time.sleep(CONFIRM_DELAY)
-    again = fetch_status()
+    again = fetch_status(LEARNED.get("doc_hash") or doc_hash)
     if again is None or again != realms:
         print("[info] cambiamento non confermato, ricontrollo al prossimo giro")
         return
@@ -154,7 +205,7 @@ def main():
 
     if text and not send(text):
         sys.exit("[error] avviso di stato non inviato")
-    STATE_FILE.write_text(json.dumps({"realms": realms, "down_since": down_since}, indent=1))
+    save_state({"realms": realms, "down_since": down_since, "doc_hash": LEARNED.get("doc_hash") or doc_hash})
 
 
 if __name__ == "__main__":

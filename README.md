@@ -18,7 +18,7 @@ Tiene solo le notizie che parlano di "Forever" e non ripubblica le notizie che h
 
 ## Stato dei server (WoW Forever EU)
 
-Ogni 5 minuti il bot controlla la pagina ufficiale [Server Status](https://worldofwarcraft.blizzard.com/en-gb/game/status/eu) di Blizzard
+Ogni 5 minuti il bot legge i dati della pagina ufficiale [Server Status](https://worldofwarcraft.blizzard.com/en-gb/game/status/eu) di Blizzard (richiesta diretta, meno di un secondo; se Blizzard cambia il formato, ripiega automaticamente aprendo la pagina con Chrome)
 per i mondi di WoW: Forever EU (Normal, PvP, Roleplay, Roleplay PvP) e scrive nel canale:
 
 - 🔴 quando uno o più server vanno offline
