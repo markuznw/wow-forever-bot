@@ -1,0 +1,9 @@
+{
+ "realms": {
+  "Roleplay": true,
+  "Roleplay PvP": true,
+  "Normal": true,
+  "PvP": true
+ },
+ "down_since": null
+}
