@@ -27,8 +27,10 @@ import blue
 
 FEEDS = [
     # (nome mostrato, url, serve il filtro parola chiave?)
-    ("Wowhead", "https://www.wowhead.com/news/rss/all", True),
+    ("Wowhead", "https://www.wowhead.com/news/rss/forever", False),  # feed dedicato a Forever
+    ("Wowhead", "https://www.wowhead.com/news/rss/all", True),       # riserva: news generali che citano Forever
 ]
+NEW_FEED_WINDOW_H = 96   # feed appena aggiunto: pubblica solo le news degli ultimi 4 giorni
 
 KEYWORD = re.compile(r"\bforever\b", re.I)
 STATE_FILE = Path(__file__).with_name("seen.json")
@@ -48,6 +50,15 @@ UA = "Mozilla/5.0 (compatible; wow-forever-telegram-bot/1.0)"
 def norm_title(t: str) -> str:
     t = re.sub(r"\s+-\s+[^-]+$", "", t)  # Google News aggiunge " - Fonte"
     return re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+
+
+def item_keys(it) -> set:
+    keys = {"u:" + norm_url(it["link"]), "t:" + norm_title(it["title"])}
+    # Wowhead usa due formati per la stessa news: news=383815/... e /forever/news/...-383815
+    m = re.search(r"wowhead\.com/(?:.*?news=(\d+)|.*?/news/[^?#]*?-(\d+))(?:[/?#]|$)", it["link"])
+    if m:
+        keys.add("w:" + (m.group(1) or m.group(2)))
+    return keys
 
 
 def norm_url(u: str) -> str:
@@ -177,6 +188,7 @@ def collect():
                 body = max((c.get("value", "") for c in e.content), key=len, default=body)
             items.append({
                 "source": name,
+                "feed": url,
                 "title": clean(e.title, 200),
                 "link": e.link,
                 "summary": clean_structured(body, SUMMARY_CHARS),
@@ -363,19 +375,29 @@ def main():
     state = load_state()
     seen = set(state["seen"])
     first_run = not state.get("initialized")
-    new = []
+    new, silent_keys = [], set()
+    known_feeds = set(state.get("feeds", []))
+    cutoff = time.time() - NEW_FEED_WINDOW_H * 3600
     for it in collect():
-        keys = {"u:" + norm_url(it["link"]), "t:" + norm_title(it["title"])}
+        keys = item_keys(it)
         if keys & seen:
+            seen |= keys  # aggiunge le chiavi nuove (es. w:<id>) a news già viste
+            silent_keys |= keys
             continue
         seen |= keys
+        if not first_run and it["feed"] not in known_feeds and it["ts"] < cutoff:
+            # feed appena aggiunto: le news vecchie si segnano come viste senza pubblicarle
+            silent_keys |= keys
+            continue
         new.append((it, keys))
 
     if first_run:
         # Primo avvio: pubblica solo le ultime FIRST_RUN_POSTS per non inondare il canale.
-        to_post = new[-FIRST_RUN_POSTS:]
+        to_post, deferred = new[-FIRST_RUN_POSTS:], []
     else:
-        to_post = new[-MAX_POSTS_PER_RUN:]
+        # dalla più vecchia; quelle in più restano per il giro successivo
+        new.sort(key=lambda x: x[0]["ts"])
+        to_post, deferred = new[:MAX_POSTS_PER_RUN], new[MAX_POSTS_PER_RUN:]
 
     # Blue post dal forum Blizzard
     if BLUE_POSTS:
@@ -388,7 +410,11 @@ def main():
             seen |= keys
             blue_new.append((it, keys))
         new += blue_new
-        to_post += blue_new[-(FIRST_RUN_BLUE if first_blue else MAX_POSTS_PER_RUN):]
+        if first_blue:
+            to_post += blue_new[-FIRST_RUN_BLUE:]
+        else:
+            to_post += blue_new[:MAX_POSTS_PER_RUN]
+            deferred += blue_new[MAX_POSTS_PER_RUN:]
         to_post.sort(key=lambda x: x[0]["ts"])
 
     posted, failed = 0, []
@@ -402,9 +428,13 @@ def main():
 
     # Le news non inviate non vengono segnate come viste: riproverà al prossimo giro.
     skip = set().union(*failed) if failed else set()
+    for _, ks in deferred:
+        skip |= ks
     old = set(state["seen"])
     order = state["seen"] + [k for _, ks in new for k in sorted(ks) if k not in old and k not in skip]
+    order += [k for k in sorted(silent_keys) if k not in set(order)]
     STATE_FILE.write_text(json.dumps({"initialized": state.get("initialized") or posted > 0 or not to_post,
+                                      "feeds": sorted(known_feeds | {u for _, u, _ in FEEDS}),
                                       "seen": order[-MAX_SEEN:]}, indent=0))
     if failed:
         sys.exit(f"[error] {len(failed)} news non inviate, vedi gli errori sopra")
