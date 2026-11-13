@@ -1,10 +1,10 @@
 {
  "realms": {
-  "Roleplay PvP": false,
-  "Normal": false,
-  "PvP": false,
-  "Roleplay": false
+  "Roleplay PvP": true,
+  "PvP": true,
+  "Roleplay": true,
+  "Normal": true
  },
- "down_since": 1794597767.8046446,
+ "down_since": null,
  "doc_hash": "e890f42a5375f136b9f9165408fb2bc372cc5f88be0b21e7dc681a70d9999c67"
 }
